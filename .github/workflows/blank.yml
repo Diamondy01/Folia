@@ -1,0 +1,220 @@
+# This is a basic workflow to help you get started with Actions
+
+name: folia
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+#  push:
+#    branches: [ "main" ]
+#  pull_request:
+#    branches: [ "main" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  schedule:
+    - cron: "0 16 * * *"
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build-default-branch:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.save_upload_url.outputs.url }}
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: set the git information
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+      - name: set-timezone
+        run: |
+          sudo timedatectl set-timezone Asia/Shanghai
+
+
+      # Runs a set of commands using the runners shell
+      - name: clone folia repo
+        run: |
+          git clone https://github.com/PaperMC/Folia.git ~/folia
+
+      - name: get build java version
+        id: get_build_java_ver1
+        run: |
+          echo "::set-output name=get_build_java_ver1::$(cat ~/folia/.github/workflows/build.yml | grep java-version | sed 's/^.........................//'| sed 's/^.................//' | sed 's/.$//')"
+
+      - name: get applyPatches command
+        id: get_applyPatches_command1
+        run: |
+          echo "::set-output name=get_applyPatches_command1::$(cat ~/folia/.github/workflows/build.yml | grep apply | sed 's/^...//'| sed 's/^..........//' | sed 's/$//')"
+
+      - uses: actions/checkout@v4
+      - name: JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ steps.get_build_java_ver1.outputs.get_build_java_ver1 }}
+          distribution: 'zulu'
+
+      - name: Get dev branch info
+        id: dev
+        run: |
+          cd ~/folia
+          echo "::set-output name=dev::$(git branch -a | grep dev | sed 's/^.................//' | sort -rV )"  
+          
+      - name: applyPathches
+        run: |
+          cd ~/folia
+          ${{ steps.get_applyPatches_command1.outputs.get_applyPatches_command1 }}
+          
+      - name: building...
+        run: |
+          cd ~/folia
+          ./gradlew createMojmapPaperclipJar
+
+      # Get the date of the build
+      - name: Get date
+        id: date
+        run: echo "::set-output name=date::$(date +'%Y-%m-%d')"
+        
+      - name: get jar file name
+        id: get_name
+        run: echo "::set-output name=name::$(ls ~/folia/build/libs/ | grep paperclip)"
+
+      - name: rename file 
+        run: "mv ~/folia/build/libs/${{ steps.get_name.outputs.name }} ~/folia/build/libs/[main]${{ steps.get_name.outputs.name }}"
+
+      - name: get latest commit information
+        id: get_commit_info
+        run: |
+          cd ~/folia
+          echo "::set-output name=commit_info1::$(echo default banch:)"
+          echo "::set-output name=commit_info2::$(echo [$(git rev-parse --short HEAD)]"(https://github.com/papermc/folia/commit/$(git rev-parse HEAD))": $(git log -1 --pretty=format:"%s" ))"
+          echo "::set-output name=commit_info3::$(echo dev banch:)"
+          echo "::set-output name=commit_info4::$(echo [$(git rev-parse --short origin/${{ steps.dev.outputs.dev }})]"(https://github.com/papermc/folia/commit/$(git rev-parse origin/${{ steps.dev.outputs.dev }}))": $(git log -1 --pretty=format:"%s"))"
+
+      # Create a release with the date as the title and tag
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.date.outputs.date }}
+          release_name: ${{ steps.date.outputs.date }}
+          body: |
+            ${{ steps.get_commit_info.outputs.commit_info1 }}
+            ${{ steps.get_commit_info.outputs.commit_info2 }}
+            ${{ steps.get_commit_info.outputs.commit_info3 }}
+            ${{ steps.get_commit_info.outputs.commit_info4 }}
+          draft: false
+          prerelease: false
+      
+      # Upload the jar file to the release as an asset
+      - name: Upload Release Asset
+        id: upload-release-asset 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} 
+          asset_path: "/home/runner/folia/build/libs/[main]${{ steps.get_name.outputs.name }}"
+          asset_name: "[main]${{ steps.get_name.outputs.name }}"
+          asset_content_type: application/java-archive
+
+      - name: save upload url
+        id: save_upload_url
+        run: |
+          echo "url=${{ steps.create_release.outputs.upload_url }}" >> "$GITHUB_OUTPUT"
+          
+    permissions:
+      contents: write
+  
+
+  build-dev-branch:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    needs: build-default-branch
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: set the git information
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+      - name: set-timezone
+        run: |
+          sudo timedatectl set-timezone Asia/Shanghai
+
+
+      # Runs a set of commands using the runners shell
+      - name: clone folia repo
+        run: |
+          git clone https://github.com/PaperMC/Folia.git ~/folia
+
+      - name: Get dev branch info
+        id: dev1
+        run: |
+          cd ~/folia
+          echo "::set-output name=dev1::$(git branch -a | grep dev | sed 's/^.................//' | sort -rV )"       
+
+      - name: checkout dev branch
+        run: |
+          cd ~/folia
+          git checkout ${{ steps.dev1.outputs.dev1 }}
+
+      - name: get build java version
+        id: get_build_java_ver2
+        run: |
+          echo "::set-output name=get_build_java_ver2::$(cat ~/folia/.github/workflows/build.yml | grep java-version | sed 's/^.........................//'| sed 's/^.................//' | sed 's/.$//')"
+
+      - name: get applyPatches command
+        id: get_applyPatches_command2
+        run: |
+          echo "::set-output name=get_applyPatches_command2::$(cat ~/folia/.github/workflows/build.yml | grep apply | sed 's/^...//'| sed 's/^..........//' | sed 's/$//')"
+
+      - uses: actions/checkout@v4
+      - name: JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ steps.get_build_java_ver2.outputs.get_build_java_ver2 }}
+          distribution: 'zulu'
+          
+      - name: applyPathches
+        run: |
+          cd ~/folia
+          ${{ steps.get_applyPatches_command2.outputs.get_applyPatches_command2 }}
+          
+      - name: building...
+        run: |
+          cd ~/folia
+          ./gradlew createMojmapPaperclipJar
+
+      # Get the date of the build
+      - name: Get date
+        id: date1
+        run: echo "::set-output name=date1::$(date +'%Y-%m-%d')"
+        
+      - name: get jar file name
+        id: get_name1
+        run: echo "::set-output name=name1::$(ls ~/folia/folia-server/build/libs/ | grep paperclip)"
+
+      - name: rename file
+        run: "mv ~/folia/folia-server/build/libs/${{ steps.get_name1.outputs.name1 }} ~/folia/folia-server/build/libs/[dev]${{ steps.get_name1.outputs.name1 }}"    
+      
+      # Upload the jar file to the release as an asset
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{needs.build-default-branch.outputs.url}}
+          asset_path: "/home/runner/folia/folia-server/build/libs/[dev]${{ steps.get_name1.outputs.name1 }}"
+          asset_name: "[dev]${{ steps.get_name1.outputs.name1 }}"
+          asset_content_type: application/java-archive
+    permissions:
+      contents: write
